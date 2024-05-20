@@ -1,0 +1,1 @@
+FederatedTrainingArguments(fl_algorithm='fedavg', clients_num=100, alpha=1.0, partition_method='clients=100_alpha=1.0', do_mimic=True, ip='127.0.0.1', port='10001', rank=1, world_size=3, ethernet=None, rounds=100, sample=0.1, pson=False, test_rounds=False, log_test_len=10)
