@@ -40,9 +40,11 @@ class ClientManager(NetworkManager):
         """
         super().setup()
         tensor = torch.Tensor([self._trainer.client_num]).int()
-        self._network.send(content=tensor,
-                           message_code=MessageCode.SetUp,
-                           dst=0)
+        self._network.send(
+            content=tensor,
+            message_code=MessageCode.SetUp,
+            dst=0
+        )
 
 
 class PassiveClientManager(ClientManager):

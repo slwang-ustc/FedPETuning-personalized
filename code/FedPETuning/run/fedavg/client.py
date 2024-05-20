@@ -5,8 +5,8 @@ from trainers.BaseClient import BaseClientTrainer, BaseClientManager
 
 
 class FedAvgClientTrainer(BaseClientTrainer, ABC):
-    def __init__(self, model, train_dataset, valid_dataset):
-        super().__init__(model, train_dataset, valid_dataset)
+    def __init__(self, model, train_dataset, valid_dataset, test_dataset):
+        super().__init__(model, train_dataset, valid_dataset, test_dataset)
 
 
 class FedAvgClientManager(BaseClientManager, ABC):

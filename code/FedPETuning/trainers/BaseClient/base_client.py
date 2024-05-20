@@ -17,11 +17,12 @@ from fedlab.core.client.manager import ORDINARY_TRAINER, SERIAL_TRAINER
 
 
 class BaseClientTrainer(ClientTrainer, ABC):
-    def __init__(self, model, train_dataset, valid_dataset):
+    def __init__(self, model, train_dataset, valid_dataset, test_dataset):
 
         self._model = model
         self.train_dataset = train_dataset
         self.valid_dataset = valid_dataset
+        self.test_dataset = test_dataset
 
         self._before_training()
 
@@ -143,11 +144,9 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _build_optimizer(self, model, train_dl_len):
         if self.training_config.max_steps > 0:
             t_total = self.training_config.max_steps
-            self.training_config.num_train_epochs = \
-                self.training_config.max_steps // (train_dl_len // self.training_config.gradient_accumulation_steps) + 1
+            self.training_config.num_train_epochs = self.training_config.max_steps // (train_dl_len // self.training_config.gradient_accumulation_steps) + 1
         else:
-            t_total = \
-                train_dl_len // self.training_config.gradient_accumulation_steps * self.training_config.num_train_epochs
+            t_total = train_dl_len // self.training_config.gradient_accumulation_steps * self.training_config.num_train_epochs
 
         # Prepare optimizer and schedule (linear warmup and decay)
         optimizer_grouped_parameters = self.get_optimized_model_params(model)
@@ -167,10 +166,14 @@ class BaseClientTrainer(ClientTrainer, ABC):
         # Prepare optimizer and schedule (linear warmup and decay)
         no_decay = ['bias', 'LayerNorm.weight']
         optimizer_grouped_parameters = [
-            {'params': [p for n, p in model.backbone.named_parameters() if
-                        not any(nd in n for nd in no_decay)], 'weight_decay': self.training_config.weight_decay},
-            {'params': [p for n, p in model.backbone.named_parameters() if
-                        any(nd in n for nd in no_decay)], 'weight_decay': 0.0},
+            {
+                'params': [p for n, p in model.backbone.named_parameters() if not any(nd in n for nd in no_decay)], 
+                'weight_decay': self.training_config.weight_decay
+            },
+            {
+                'params': [p for n, p in model.backbone.named_parameters() if any(nd in n for nd in no_decay)], 
+                'weight_decay': 0.0
+            },
         ]
 
         # Both pieces of code have the same effect
@@ -238,15 +241,15 @@ class BaseClientTrainer(ClientTrainer, ABC):
             #     break
             self._model.train()
             batch = tuple(t.to(self.device) for t in batch)
-            inputs = {'input_ids': batch[0],
-                      'attention_mask': batch[1],
-                      'labels': batch[3]
-                      }
+            inputs = {
+                'input_ids': batch[0],
+                'attention_mask': batch[1],
+                'labels': batch[3]
+            }
             label = inputs['labels']
             if self.model_config.model_type != 'distilbert' or self.model_config.model_type != 'roberta':
                 # XLM, DistilBERT and RoBERTa don't use segment_ids
-                inputs['token_type_ids'] = batch[2] \
-                    if self.model_config.model_type in ['bert', 'xlnet'] else None
+                inputs['token_type_ids'] = batch[2] if self.model_config.model_type in ['bert', 'xlnet'] else None
             outputs = self._model(inputs)
 
             loss, logits = outputs[:2]
@@ -263,7 +266,8 @@ class BaseClientTrainer(ClientTrainer, ABC):
                     from apex import amp
                 except ImportError:
                     raise ImportError(
-                        "Please install apex from https://www.github.com/nvidia/apex to use fp16 training.")
+                        "Please install apex from https://www.github.com/nvidia/apex to use fp16 training."
+                    )
 
                 with amp.scale_loss(loss, optimizer) as scaled_loss:
                     scaled_loss.backward()
@@ -289,19 +293,22 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _on_epoch_end(self, idx):
         """on epoch end"""
 
-        self.logger.info(f"{self.data_config.task_name.upper()} Train, "
-                         f"Client:{idx}, Loss:{self.tr_loss/self.global_step:.3f}, "
-                         f"Accuracy:{self.correct/self.total:.3f}")
+        self.logger.info(
+            f"{self.data_config.task_name.upper()} Train, "
+            f"Client: {idx}, Train Loss: {self.tr_loss/self.global_step:.3f}, "
+            f"Train Accuracy: {self.correct/self.total:.3f}"
+        )
 
-        if not self.federated_config.pson:
-            # not need for local test
-            return
+        # if not self.federated_config.pson:
+        #     # not need for local test
+        #     return
 
-        valid_data = self._get_dataloader(dataset=self.valid_dataset, client_id=idx)
+        # valid_data = self._get_dataloader(dataset=self.valid_dataset, client_id=idx)
+        test_data = self._get_dataloader(dataset=self.test_dataset, client_id=idx)
 
         result = self.eval.test_and_eval(
             model=self._model,
-            valid_dl=valid_data,
+            valid_dl=test_data,
             model_type=self.model_config.model_type,
             model_output_mode=self.model_config.model_output_mode
         )
@@ -318,10 +325,12 @@ class BaseClientTrainer(ClientTrainer, ABC):
         else:
             self.loc_patient_times += 1
 
-        self.logger.debug(f"{self.data_config.task_name.upper()} Eval, "
-                          f"Client:{idx}, Loss:{test_loss:.3f}, "
-                          f"Current {self.metric_name}:{test_metric:.3f}, "
-                          f"Best {self.metric_name}:{self.loc_best_metric[idx]:.3f}")
+        self.logger.info(
+            f"{self.data_config.task_name.upper()} Test, "
+            f"Client:{idx}, Test Loss:{test_loss:.3f}, "
+            f"Test {self.metric_name}: {test_metric:.3f}, "
+            # f"Best {self.metric_name}:{self.loc_best_metric[idx]:.3f}"
+        )
 
         if self.loc_patient_times >= self.training_config.patient_times:
             self.stop_early = True
@@ -351,8 +360,7 @@ class BaseClientManager(PassiveClientManager, ABC):
 
             elif message_code == MessageCode.ParameterUpdate:
 
-                id_list, payload = payload[0].to(
-                    torch.int32).tolist(), payload[1:]
+                id_list, payload = payload[0].to(torch.int32).tolist(), payload[1:]
 
                 # check the trainer type
                 if self._trainer.type == SERIAL_TRAINER:  # serial

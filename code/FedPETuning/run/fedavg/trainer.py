@@ -30,6 +30,7 @@ class FedAvgTrainer(BaseTrainer):
             model=self.model,
             train_dataset=self.data.train_dataloader_dict,
             valid_dataset=self.data.valid_dataloader_dict,
+            test_dataset=self.data.test_dataloader_dict
             # data_slices=self.federated_config.clients_id_list,
         )
 
