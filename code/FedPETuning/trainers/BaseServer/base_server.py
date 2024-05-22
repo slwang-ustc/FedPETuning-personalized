@@ -16,6 +16,8 @@ from fedlab.utils.serialization import SerializationTool
 from fedlab.utils import MessageCode
 from fedlab.core.coordinator import Coordinator
 
+import copy
+
 
 class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
     def __init__(self, model, valid_data, test_data):
@@ -40,6 +42,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
 
         # client buffer
         self.client_buffer_cache = []
+        self.client_metrics_cache = []
         self.cache_cnt = 0
 
         # stop condition
@@ -49,8 +52,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
         #  metrics & eval
         self._build_metric()
         self._build_eval()
-        self.global_valid_best_metric = \
-            float("inf") if self.training_config.is_decreased_valid_metric else -float("inf")
+        self.global_valid_best_metric = float("inf") if self.training_config.is_decreased_valid_metric else -float("inf")
         self.global_test_best_metric = 0.0
         self.metric_log = {
             "model_type": self.model_config.model_type,
@@ -105,10 +107,17 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
     def _update_global_model(self, payload):
         assert len(payload) > 0
 
+        # if len(payload) == 1:
+        #     self.client_buffer_cache.append(payload[0].clone())
+        # else:
+        #     self.client_buffer_cache += payload  # serial trainer
+
         if len(payload) == 1:
             self.client_buffer_cache.append(payload[0].clone())
         else:
-            self.client_buffer_cache += payload  # serial trainer
+            print(len(payload))
+            self.client_buffer_cache += copy.deepcopy(payload[: int(len(payload) / 2)])
+            self.client_metrics_cache += copy.deepcopy(payload[int(len(payload) / 2):])
 
         assert len(self.client_buffer_cache) <= self.client_num_per_round
 
@@ -121,20 +130,55 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             # use aggregator
             serialized_parameters = Aggregators.fedavg_aggregate(model_parameters_list)
             SerializationTool.deserialize_model(self._model, serialized_parameters)
+
+            global_test_metric = 0.0
+            for metric in self.client_metrics_cache:
+                global_test_metric += metric
+            global_test_metric /= len(self.client_metrics_cache)
+
             self.round += 1
 
-            self.valid_on_server()
+            # self.valid_on_server()
+
+
+            # TODO hard code
+            if self.global_valid_best_metric < global_test_metric:
+                self.global_valid_best_metric = global_test_metric
+                self.best_glo_params = SerializationTool.serialize_model(self._model)
+
+            self.logger.info(f"{self.data_config.task_name}-{self.model_config.model_type} "
+                            f"train with client={self.federated_config.clients_num}_"
+                            f"alpha={self.federated_config.alpha}_"
+                            f"epoch={self.training_config.num_train_epochs}_"
+                            f"seed={self.training_config.seed}_"
+                            f"comm_round={self.federated_config.rounds}")
+
+            self.logger.debug(f"{self.federated_config.fl_algorithm} "
+                          f"Round: {self.round}, "
+                          f"Current Test {self.metric_name}: {global_test_metric:.3f}, "
+                          f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n")
+
+            self.metric_log["logs"].append(
+                {
+                    f"round_{self.round}": {
+                        # "loss": f"{test_loss:.3f}",
+                        f"{self.metric.metric_name}": f"{global_test_metric:.3f}"
+                    }
+                }
+            )
+
+
 
             if self.federated_config.test_rounds:
                 if self.round % self.federated_config.log_test_len == 0:
                     result = self.test_on_server()
                     if "test_rounds" not in self.metric_log:
                         self.metric_log["test_rounds"] = {}
-                    self.metric_log["test_rounds"][f"round_{self.round}"] \
-                        = result[self.metric_name]
+                    self.metric_log["test_rounds"][f"round_{self.round}"] = result[self.metric_name]
 
             # reset cache cnt
             self.client_buffer_cache = []
+            self.client_metrics_cache = []
 
             return True  # return True to end this round.
         else:
@@ -179,8 +223,10 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             model_output_mode=self.model_config.model_output_mode
         )
 
-        self.logger.critical(f"task:{self.data_config.task_name}, Setting:{self.metric_log['info']}, "
-                             f"Test {self.metric_name.upper()}:{result[self.metric_name]:.3f}")
+        self.logger.critical(
+            f"task:{self.data_config.task_name}, Setting:{self.metric_log['info']}, "
+            f"Test {self.metric_name.upper()}:{result[self.metric_name]:.3f}"
+        )
 
         self.global_test_best_metric = result[self.metric_name]
 
@@ -210,10 +256,11 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
                           f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n")
 
         self.metric_log["logs"].append(
-            {f"round_{self.round}": {
-                "loss": f"{test_loss:.3f}",
-                f"{self.metric.metric_name}": f"{test_metric:.3f}"
-            }
+            {
+                f"round_{self.round}": {
+                    "loss": f"{test_loss:.3f}",
+                    f"{self.metric.metric_name}": f"{test_metric:.3f}"
+                }
             }
         )
 
@@ -300,9 +347,11 @@ class BaseServerManager(ServerManager):
         for rank, values in rank_dict.items():
             downlink_package = self._handler.downlink_package
             id_list = torch.Tensor(values).to(downlink_package[0].dtype)
-            self._network.send(content=[id_list] + downlink_package,
-                               message_code=MessageCode.Exit,
-                               dst=rank)
+            self._network.send(
+                content=[id_list] + downlink_package,
+                message_code=MessageCode.Exit,
+                dst=rank
+            )
 
         # wait for client exit feedback
         _, message_code, _ = self._network.recv(

@@ -1,5 +1,5 @@
 """Test some code snippets"""
-# bash fed_run.sh /data/slwang/FedPETuning rte fedavg 10001 0 1 2 3 4 5
+# bash fed_run.sh /data/slwang/FedPETuning_personalized rte fedavg 10001 0 1 2 3 4 5
 
 import torch
 import torch.nn as nn

@@ -48,16 +48,21 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         # key: client idx, value: valid metric
         self.loc_best_metric = {}
-        # key: client idx, value: test metric
-        self.loc_test_metric = {}
         # key: client idx, value: serialized params
         self.loc_best_params = {}
+
+        # key: client idx, value: test metric
+        self.loc_test_metric = {}
+        self.loc_train_metric = {}
+        
         # local patient times
         self.loc_patient_times = 0
         # local early stop
         self.stop_early = False
 
+        # "acc"
         self.metric_name = self.metric.metric_name
+
         self._model.to(self.device)
 
         if self.federated_config.rank == -1:
@@ -86,6 +91,9 @@ class BaseClientTrainer(ClientTrainer, ABC):
     def _train_alone(self, idx: int, model_parameters: torch.Tensor, *args, **kwargs):
         """local training for Client"""
 
+        self.loc_train_metric[idx] = 0.0
+        # self.loc_test_metric[idx] = 0.0
+
         train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
         if model_parameters is not None:
             SerializationTool.deserialize_model(self._model, model_parameters)
@@ -102,6 +110,28 @@ class BaseClientTrainer(ClientTrainer, ABC):
             if self.federated_config.pson and self.stop_early:
                 self.logger.critical(f"local stop early in {epoch}")
                 break
+
+        self.test_on_client(idx)
+        self.loc_test_metric[idx] /= (epoch + 1)
+
+    def test_on_client(self, idx):
+        test_data = self._get_dataloader(dataset=self.test_dataset, client_id=idx)
+
+        result = self.eval.test_and_eval(
+            model=self._model,
+            valid_dl=test_data,
+            model_type=self.model_config.model_type,
+            model_output_mode=self.model_config.model_output_mode
+        )
+
+        test_metric, test_loss = result[self.metric_name], result["eval_loss"]
+
+        self.logger.info(
+            f"{self.data_config.task_name.upper()} Test, "
+            f"Client:{idx}, Test Loss:{test_loss:.3f}, "
+            f"Test {self.metric_name}: {test_metric:.3f}, "
+        )
+        self.loc_test_metric[idx] = test_metric
 
     def _get_dataloader(self, dataset, client_id: int):
         """Get :class:`DataLoader` for ``client_id``."""
@@ -210,25 +240,6 @@ class BaseClientTrainer(ClientTrainer, ABC):
             self.device, self.metric
         )
 
-    def test_on_client(self, test_dataloader):
-
-        for idx in self.loc_best_params:
-            loc_best_params = self.loc_best_params[idx]
-            SerializationTool.deserialize_model(self._model, loc_best_params)
-            result = self.eval.test_and_eval(
-                model=self._model,
-                valid_dl=test_dataloader,
-                model_type=self.model_config.model_type,
-                model_output_mode=self.model_config.model_output_mode
-            )
-            test_metric, test_loss = result[self.metric_name], result["eval_loss"]
-            self.logger.critical(
-                f"{self.data_config.task_name.upper()} Test, "
-                f"Client:{idx}, Test loss:{test_loss:.3f}, "
-                f"Test {self.metric_name}:{test_metric:.3f}"
-            )
-            self.loc_test_metric[idx] = test_metric
-
     # Local Epoch Function
     def _on_epoch_begin(self):
         self.global_step = 0
@@ -295,41 +306,42 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         self.logger.info(
             f"{self.data_config.task_name.upper()} Train, "
-            f"Client: {idx}, Train Loss: {self.tr_loss/self.global_step:.3f}, "
-            f"Train Accuracy: {self.correct/self.total:.3f}"
+            f"Client: {idx}, Train Loss: {self.tr_loss / self.global_step:.3f}, "
+            f"Train Accuracy: {self.correct / self.total:.3f}"
         )
 
-        # if not self.federated_config.pson:
-        #     # not need for local test
-        #     return
+        self.loc_train_metric[idx] += self.correct / self.total
 
-        # valid_data = self._get_dataloader(dataset=self.valid_dataset, client_id=idx)
-        test_data = self._get_dataloader(dataset=self.test_dataset, client_id=idx)
+        if not self.federated_config.pson:
+            # not need for local test
+            return
+
+        valid_data = self._get_dataloader(dataset=self.valid_dataset, client_id=idx)
 
         result = self.eval.test_and_eval(
             model=self._model,
-            valid_dl=test_data,
+            valid_dl=valid_data,
             model_type=self.model_config.model_type,
             model_output_mode=self.model_config.model_output_mode
         )
 
-        test_metric, test_loss = result[self.metric_name], result["eval_loss"]
+        valid_metric, valid_loss = result[self.metric_name], result["eval_loss"]
 
         # TODO hard code
         if not self.loc_best_metric.get(idx, None):
             self.loc_best_metric[idx] = float('-inf')
-        if self.loc_best_metric[idx] < test_metric:
-            self.loc_best_metric[idx] = test_metric
+        if self.loc_best_metric[idx] < valid_metric:
+            self.loc_best_metric[idx] = valid_metric
             self.loc_best_params[idx] = SerializationTool.serialize_model(self._model)
             self.loc_patient_times = 0
         else:
             self.loc_patient_times += 1
 
         self.logger.info(
-            f"{self.data_config.task_name.upper()} Test, "
-            f"Client:{idx}, Test Loss:{test_loss:.3f}, "
-            f"Test {self.metric_name}: {test_metric:.3f}, "
-            # f"Best {self.metric_name}:{self.loc_best_metric[idx]:.3f}"
+            f"{self.data_config.task_name.upper()} Eval, "
+            f"Client:{idx}, Valid Loss:{valid_loss:.3f}, "
+            f"Valid {self.metric_name}: {valid_metric:.3f}, "
+            f"Best Valid {self.metric_name}: {self.loc_best_metric[idx]:.3f}"
         )
 
         if self.loc_patient_times >= self.training_config.patient_times:
@@ -350,16 +362,19 @@ class BaseClientManager(PassiveClientManager, ABC):
             3. client synchronizes with server actively.
         """
         while True:
+
+            # 每一轮开始，从服务器接收 全局模型
             sender_rank, message_code, payload = self._network.recv(src=0)
+
 
             if message_code == MessageCode.Exit:
                 # client exit feedback
                 if self._network.rank == self._network.world_size - 1:
                     self._network.send(message_code=MessageCode.Exit, dst=0)
                 break
-
+            
             elif message_code == MessageCode.ParameterUpdate:
-
+                # id_list: 本rank包含的客户端id, payload: 模型参数
                 id_list, payload = payload[0].to(torch.int32).tolist(), payload[1:]
 
                 # check the trainer type
@@ -372,7 +387,8 @@ class BaseClientManager(PassiveClientManager, ABC):
                 elif self._trainer.type == ORDINARY_TRAINER:  # ordinary
                     assert len(id_list) == 1
                     self._trainer.local_process(payload=payload)
-
+                
+                self.id_list = id_list
                 self.synchronize()
 
             else:
@@ -381,8 +397,15 @@ class BaseClientManager(PassiveClientManager, ABC):
     def synchronize(self):
         """Synchronize with server"""
         self.logger.info("Uploading information to server.")
+
+        test_metrics = []
+        for idx in self.id_list:
+            test_metrics.append(torch.tensor(self._trainer.loc_test_metric[idx]))
+
+        content = self._trainer.uplink_package + test_metrics
+
         self._network.send(
-            content=self._trainer.uplink_package,
+            content=content,
             message_code=MessageCode.ParameterUpdate,
             dst=0
         )

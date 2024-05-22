@@ -38,7 +38,10 @@ class ClientManager(NetworkManager):
 
         :class:`ClientManager` reports number of clients simulated by current client process.
         """
+        # 初始化 网络
         super().setup()
+
+        # 向服务器发送本rank包含的 客户端数量
         tensor = torch.Tensor([self._trainer.client_num]).int()
         self._network.send(
             content=tensor,
