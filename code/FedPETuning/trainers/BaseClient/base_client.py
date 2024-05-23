@@ -65,6 +65,11 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         self._model.to(self.device)
 
+        # key: idx of client, value: non-personalized params idxes
+        self.non_pers_params_idxes = {}
+        # key: idx of client, value: latest local model parameters (tensor)
+        self.latest_parameters = {}
+
         if self.federated_config.rank == -1:
             self._calculate_model_computation()
 
@@ -96,7 +101,15 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
         if model_parameters is not None:
-            SerializationTool.deserialize_model(self._model, model_parameters)
+            if self.non_pers_params_idxes.get(key=idx, default=None) == None:
+                # self.non_pers_params_idxes[idx] = [0, 1, 2, 3, 4, 5, 6]
+                SerializationTool.deserialize_model(self._model, model_parameters)
+            else:
+                SerializationTool.deserialize_personalized_model(
+                    self._model, 
+                    model_parameters, self.latest_parameters[idx], 
+                    self.non_pers_params_idxes[idx]
+                )
 
         # build optimizer,scheduler,loss
         optimizer, scheduler = self._build_optimizer(self._model, len(train_loader))
@@ -113,6 +126,11 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         self.test_on_client(idx)
         self.loc_test_metric[idx] /= (epoch + 1)
+
+        # TODO
+        self.non_pers_params_idxes[idx] = [0, 1 , 2, 3, 4, 5, 6]
+        
+        self.latest_parameters[idx] = self.model_parameters
 
     def test_on_client(self, idx):
         test_data = self._get_dataloader(dataset=self.test_dataset, client_id=idx)

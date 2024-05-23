@@ -81,12 +81,40 @@ class BaseModels(nn.Module, ABC):
             delta_config = AutoDeltaConfig.from_dict(delta_args)
             delta_model = AutoDeltaModel.from_config(delta_config, backbone_model=backbone)
             delta_model.freeze_module(set_state_dict=True)
+
+            self.delta_type = delta_args['delta_type']
             # delta_model.log(delta_ratio=True, trainable_ratio=True, visualization=True)
             # self.logger.debug(delta_config)
             # self.logger.debug(backbone)
             # self.logger.debug(delta_args)
 
         return backbone
+    
+    # all
+    def _map_name_with_layer_idx(self):
+        name_idx_mapping = {}
+        layer_idx = 0
+        for name, _ in self.backbone.named_parameters():
+            name_idx_mapping[name] = layer_idx
+            layer_idx += 1
+        return name_idx_mapping
+    
+    # deltas + classifier
+    def _get_trainable_params_name(self):
+        trainable_params_names = []
+        layer_trainable_params_names = []
+        count = 0
+        for k, _ in self.backbone.state_dict().items():
+            if self.delta_type == 'adapter':
+                if count % 8 == 0 and count != 0:
+                    trainable_params_names.append(layer_trainable_params_names)
+                    layer_trainable_params_names = []
+                layer_trainable_params_names.append(k)
+                count += 1
+            else:
+                pass
+        trainable_params_names.append(layer_trainable_params_names)
+        return trainable_params_names
 
     def forward(self, inputs):
         raise NotImplementedError

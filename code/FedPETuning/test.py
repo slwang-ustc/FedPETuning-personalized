@@ -40,15 +40,62 @@ from torch.nn import functional as F
 # print(f'slice: {slice}')
 # slices = [2, 2, 2]
 
+from transformers import trainer, AutoConfig
 
-x = torch.tensor([1,2,3,4])
-y = torch.tensor([5,6,7,8])
+from opendelta import AutoDeltaConfig
+from opendelta.auto_delta import AutoDeltaModel
+from bigmodelvis import Visualization
 
-para_list = [x, y]
-weights = torch.ones(2)
-weights = weights / torch.sum(weights)
+from transformers import AutoModelForTokenClassification, AutoModelForSequenceClassification
 
-para_list_stack = torch.stack(para_list, dim=-1)
-print(torch.sum(para_list_stack * weights, dim=-1))
+auto_config = AutoConfig.from_pretrained(
+    pretrained_model_name_or_path = '/data/slwang/FedPETuning_personalized/pretrain/nlp/roberta-base/',
+    finetuning_task='rte',
+    # cache_dir=self.model_config.cache_dir,
+    revision='main',
+    use_auth_token=None,
+    num_labels=2
+)
 
-print(x, x.int())
+backbone = AutoModelForSequenceClassification.from_pretrained(
+    pretrained_model_name_or_path='/data/slwang/FedPETuning_personalized/pretrain/nlp/roberta-base/',
+    from_tf=False,
+    config=auto_config,
+    # cache_dir=self.model_config.cache_dir,
+    revision='main',
+    use_auth_token=None,
+    # ignore_mismatched_sizes=self.model_config.ignore_mismatched_sizes,
+)
+
+delta_args = {'delta_type': 'adapter', 'learning_rate': 0.001, 'unfrozen_modules': ['deltas', 'layer_norm', 'final_layer_norm', 'classifier'], 'bottleneck_dim': 64}
+delta_config = AutoDeltaConfig.from_dict(delta_args)
+delta_model = AutoDeltaModel.from_config(delta_config, backbone_model=backbone)
+
+
+delta_model.freeze_module(set_state_dict=True)
+
+# name_idx_mapping = {}
+# layer_idx = 0
+# for name, _ in backbone.named_parameters():
+#     name_idx_mapping[name] = layer_idx
+#     layer_idx += 1
+# trainable_params_name = []
+# layer_trainable_params_name = []
+# count = 0
+# for k, _ in backbone.state_dict().items():
+#     if count % 8 == 0 and count != 0:
+#         trainable_params_name.append(layer_trainable_params_name)
+#         layer_trainable_params_name = []
+#     layer_trainable_params_name.append(k)
+#     count += 1
+# trainable_params_name.append(layer_trainable_params_name)
+# names = trainable_params_name[: 3]
+# upload_params_idxes = []
+# for layer_names in names:
+#     for name in layer_names:
+#         upload_params_idxes.append(name_idx_mapping[name])
+# print(upload_params_idxes)
+
+# delta_model.log(delta_ratio=True, trainable_ratio=True, visualization=True)
+# Visualization(backbone).structure_graph()
+

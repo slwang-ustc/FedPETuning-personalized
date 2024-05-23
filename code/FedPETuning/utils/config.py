@@ -254,6 +254,12 @@ def build_config():
                  f"cli={config.F.clients_num}_alp={config.F.alpha}_cr={config.F.rounds}_sap={config.F.sample}_"
                  f"lr={config.T.learning_rate}_epo={config.T.num_train_epochs}")
 
+    # logger.info(f"registry: {registry.mapping}")
+    # logger.info(f"model_config: {config.model_config}")
+    # logger.info(f"data_config: {config.data_config}")
+    # logger.info(f"training_config: {config.training_config}")
+    # logger.info(f"federated_config: {config.federated_config}")
+
     # logger.debug(delta_config)
     # exit()
     return config
