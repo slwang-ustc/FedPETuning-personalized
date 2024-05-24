@@ -101,7 +101,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
         if model_parameters is not None:
-            if self.non_pers_params_idxes.get(key=idx, default=None) == None:
+            if self.non_pers_params_idxes.get(idx, None) == None:
                 # self.non_pers_params_idxes[idx] = [0, 1, 2, 3, 4, 5, 6]
                 SerializationTool.deserialize_model(self._model, model_parameters)
             else:
@@ -128,7 +128,14 @@ class BaseClientTrainer(ClientTrainer, ABC):
         self.loc_test_metric[idx] /= (epoch + 1)
 
         # TODO
-        self.non_pers_params_idxes[idx] = [0, 1 , 2, 3, 4, 5, 6]
+        self.non_pers_params_idxes[idx] = []
+        # non_pers_params_layers = [0, 1 , 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        non_pers_params_layers = [0, 1 , 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]
+        for layer_idx in non_pers_params_layers:
+            for name in self._model.trainable_params_names[layer_idx]:
+                self.non_pers_params_idxes[idx].append(self._model.name_idx_mapping[name])
+        # print(f'===================================non_pers_params_idxes of client {idx} is {self.non_pers_params_idxes[idx]}')
+            
         
         self.latest_parameters[idx] = self.model_parameters
 
@@ -416,11 +423,16 @@ class BaseClientManager(PassiveClientManager, ABC):
         """Synchronize with server"""
         self.logger.info("Uploading information to server.")
 
+        uplink_package = self._trainer.uplink_package
+
+        upload_params_idxes = []
         test_metrics = []
         for idx in self.id_list:
-            test_metrics.append(torch.tensor(self._trainer.loc_test_metric[idx]))
+            test_metrics.append(torch.tensor(self._trainer.loc_test_metric[idx]).to(uplink_package[0].dtype))
+            upload_params_idxes.append(torch.tensor(self._trainer.non_pers_params_idxes[idx]).to(uplink_package[0].dtype))
 
-        content = self._trainer.uplink_package + test_metrics
+        content = uplink_package + upload_params_idxes + test_metrics
+        # print(f'===========================================, content is {content}')
 
         self._network.send(
             content=content,

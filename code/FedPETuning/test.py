@@ -5,41 +5,6 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-# class Net(nn.Module):
-#     def __init__(self):
-#         super(Net, self).__init__()
- 
-#         #三层全连接层
-#         #wx+b
-#         self.fc1 = nn.Linear(2, 4)
-#         self.fc2 = nn.Linear(4, 2)
-#         self.fc3 = nn.Linear(2, 5)
- 
-#     def forward(self, x):
-#         # x: [b, 1, 28, 28]
-#         x = F.relu(self.fc1(x)) #F.relu和torch.relu，用哪个都行
-#         # x = F.relu(self.fc2(x))
-#         # x = self.fc3(x)
- 
-#         return x
-
-# parameters = []
-# net = Net()
-# for para in net.parameters():
-#     # print(para.data.view(-1))
-#     parameters.append(para.data.view(-1))
-#     # print(para.grad)
-
-# parameters = torch.cat(parameters)
-# id_list = [torch.Tensor([1, 2, 3]).to(parameters.dtype)]
-# print(parameters)
-# print(id_list)
-# content = id_list + [parameters]
-# print(f'content: {content}')
-# slice = [content[0].numel(), len(list(content[0].shape))] + list(content[0].shape)
-# print(f'slice: {slice}')
-# slices = [2, 2, 2]
-
 from transformers import trainer, AutoConfig
 
 from opendelta import AutoDeltaConfig
@@ -74,28 +39,9 @@ delta_model = AutoDeltaModel.from_config(delta_config, backbone_model=backbone)
 
 delta_model.freeze_module(set_state_dict=True)
 
-# name_idx_mapping = {}
-# layer_idx = 0
-# for name, _ in backbone.named_parameters():
-#     name_idx_mapping[name] = layer_idx
-#     layer_idx += 1
-# trainable_params_name = []
-# layer_trainable_params_name = []
-# count = 0
-# for k, _ in backbone.state_dict().items():
-#     if count % 8 == 0 and count != 0:
-#         trainable_params_name.append(layer_trainable_params_name)
-#         layer_trainable_params_name = []
-#     layer_trainable_params_name.append(k)
-#     count += 1
-# trainable_params_name.append(layer_trainable_params_name)
-# names = trainable_params_name[: 3]
-# upload_params_idxes = []
-# for layer_names in names:
-#     for name in layer_names:
-#         upload_params_idxes.append(name_idx_mapping[name])
-# print(upload_params_idxes)
+for idx, (name, params) in enumerate(backbone.named_parameters()):
+    if 'adapter' in name:
+        print(idx)
 
 # delta_model.log(delta_ratio=True, trainable_ratio=True, visualization=True)
 # Visualization(backbone).structure_graph()
-

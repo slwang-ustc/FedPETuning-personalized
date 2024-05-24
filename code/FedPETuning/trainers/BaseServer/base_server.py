@@ -43,6 +43,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
         # client buffer
         self.client_buffer_cache = []
         self.client_metrics_cache = []
+        self.client_params_idxes_cache = []
         self.cache_cnt = 0
 
         # stop condition
@@ -116,8 +117,9 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             self.client_buffer_cache.append(payload[0].clone())
         else:
             print(len(payload))
-            self.client_buffer_cache += copy.deepcopy(payload[: int(len(payload) / 2)])
-            self.client_metrics_cache += copy.deepcopy(payload[int(len(payload) / 2):])
+            self.client_buffer_cache += copy.deepcopy(payload[: int(len(payload) / 3)])
+            self.client_params_idxes_cache += copy.deepcopy(payload[int(len(payload) / 3): int(len(payload) / 3 * 2)])
+            self.client_metrics_cache += copy.deepcopy(payload[int(len(payload) / 3 * 2): ])
 
         assert len(self.client_buffer_cache) <= self.client_num_per_round
 
@@ -128,9 +130,14 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             )
 
             # use aggregator
-            serialized_parameters = Aggregators.fedavg_aggregate(model_parameters_list)
+            # serialized_parameters = Aggregators.fedavg_aggregate(model_parameters_list)
+            serialized_parameters = Aggregators.persona_aggregate(
+                model_parameters_list, self.model_parameters, 
+                self.client_params_idxes_cache, self._model
+            )
             SerializationTool.deserialize_model(self._model, serialized_parameters)
 
+            print(f'==========================================accs: {self.client_metrics_cache}')
             global_test_metric = 0.0
             for metric in self.client_metrics_cache:
                 global_test_metric += metric
@@ -178,6 +185,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
 
             # reset cache cnt
             self.client_buffer_cache = []
+            self.client_params_idxes_cache = []
             self.client_metrics_cache = []
 
             return True  # return True to end this round.
@@ -308,20 +316,14 @@ class BaseServerManager(ServerManager):
                 else:
                     raise Exception(
                         "Unexpected message code {}".format(message_code))
+                
+            # test_on_clients = threading.Thread(target=self.test_on_clients)
+            # test_on_clients.start()
 
-    def shutdown(self):
-        """Shutdown stage."""
-        self.shutdown_clients()
-        super().shutdown()
-
-    def activate_clients(self):
-
-        self.logger.info("\nBaseClient activation procedure")
-        clients_this_round = self._handler.sample_clients()
-        rank_dict = self.coordinator.map_id_list(clients_this_round)
+    def test_on_clients(self):
+        self.logger.info("\nBaseClient test procedure")
+        rank_dict = self.coordinator.map_id_list(self.clients_this_round)
         self.logger.info(f'rank_dict: {rank_dict}')
-
-        self.logger.info("BaseClient id list: {}".format(clients_this_round))
 
         for rank, values in rank_dict.items():
             downlink_package = self._handler.downlink_package
@@ -331,6 +333,31 @@ class BaseServerManager(ServerManager):
                 message_code=MessageCode.ParameterUpdate,
                 dst=rank
             )
+
+    def shutdown(self):
+        """Shutdown stage."""
+        self.shutdown_clients()
+        super().shutdown()
+
+    def activate_clients(self):
+
+        self.logger.info("\nBaseClient activation procedure")
+        self.clients_this_round = self._handler.sample_clients()
+        rank_dict = self.coordinator.map_id_list(self.clients_this_round)
+        self.logger.info(f'rank_dict: {rank_dict}')
+
+        self.logger.info("BaseClient id list: {}".format(self.clients_this_round))
+
+        for rank, values in rank_dict.items():
+            downlink_package = self._handler.downlink_package
+            id_list = torch.Tensor(values).to(downlink_package[0].dtype)
+            self._network.send(
+                content=[id_list] + downlink_package,
+                message_code=MessageCode.ParameterUpdate,
+                dst=rank
+            )
+
+        # return rank
 
     def shutdown_clients(self):
         """Shutdown all clients.
