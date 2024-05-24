@@ -13,6 +13,7 @@ all_delta_config = {
             ],
             # "bottleneck_dim": 16,
             "bottleneck_dim": 64,
+            # "num_train_epochs": 3,
         },
     'soft_prompt_roberta-base':
         {

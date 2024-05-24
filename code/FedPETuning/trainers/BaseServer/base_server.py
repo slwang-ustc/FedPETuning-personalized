@@ -108,18 +108,12 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
     def _update_global_model(self, payload):
         assert len(payload) > 0
 
-        # if len(payload) == 1:
-        #     self.client_buffer_cache.append(payload[0].clone())
-        # else:
-        #     self.client_buffer_cache += payload  # serial trainer
-
         if len(payload) == 1:
             self.client_buffer_cache.append(payload[0].clone())
         else:
             print(len(payload))
-            self.client_buffer_cache += copy.deepcopy(payload[: int(len(payload) / 3)])
-            self.client_params_idxes_cache += copy.deepcopy(payload[int(len(payload) / 3): int(len(payload) / 3 * 2)])
-            self.client_metrics_cache += copy.deepcopy(payload[int(len(payload) / 3 * 2): ])
+            self.client_buffer_cache += copy.deepcopy(payload[: int(len(payload) / 2)])
+            self.client_params_idxes_cache += copy.deepcopy(payload[int(len(payload) / 2): ])
 
         assert len(self.client_buffer_cache) <= self.client_num_per_round
 
@@ -128,15 +122,31 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             self.logger.debug(
                 f"Model parameters aggregation, number of aggregation elements {len(model_parameters_list)}"
             )
-
-            # use aggregator
-            # serialized_parameters = Aggregators.fedavg_aggregate(model_parameters_list)
             serialized_parameters = Aggregators.persona_aggregate(
                 model_parameters_list, self.model_parameters, 
                 self.client_params_idxes_cache, self._model
             )
             SerializationTool.deserialize_model(self._model, serialized_parameters)
 
+            # reset cache cnt
+            self.client_buffer_cache = []
+            self.client_params_idxes_cache = []
+            
+
+            return True  # return True to end this round.
+        else:
+            return False
+        
+    def _compute_global_test_metric(self, payload):
+        if len(payload) == 1:
+            self.client_metrics_cache.append(payload[0].clone())
+        else:
+            print(len(payload))
+            self.client_metrics_cache += copy.deepcopy(payload)
+
+        assert len(self.client_metrics_cache) <= self.client_num_per_round
+
+        if len(self.client_metrics_cache) == self.client_num_per_round:
             print(f'==========================================accs: {self.client_metrics_cache}')
             global_test_metric = 0.0
             for metric in self.client_metrics_cache:
@@ -144,9 +154,6 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             global_test_metric /= len(self.client_metrics_cache)
 
             self.round += 1
-
-            # self.valid_on_server()
-
 
             # TODO hard code
             if self.global_valid_best_metric < global_test_metric:
@@ -161,9 +168,9 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
                             f"comm_round={self.federated_config.rounds}")
 
             self.logger.debug(f"{self.federated_config.fl_algorithm} "
-                          f"Round: {self.round}, "
-                          f"Current Test {self.metric_name}: {global_test_metric:.3f}, "
-                          f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n")
+                            f"Round: {self.round}, "
+                            f"Current Test {self.metric_name}: {global_test_metric:.3f}, "
+                            f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n\n")
 
             self.metric_log["logs"].append(
                 {
@@ -173,9 +180,6 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
                     }
                 }
             )
-
-
-
             if self.federated_config.test_rounds:
                 if self.round % self.federated_config.log_test_len == 0:
                     result = self.test_on_server()
@@ -183,11 +187,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
                         self.metric_log["test_rounds"] = {}
                     self.metric_log["test_rounds"][f"round_{self.round}"] = result[self.metric_name]
 
-            # reset cache cnt
-            self.client_buffer_cache = []
-            self.client_params_idxes_cache = []
             self.client_metrics_cache = []
-
             return True  # return True to end this round.
         else:
             return False
@@ -304,10 +304,12 @@ class BaseServerManager(ServerManager):
     def main_loop(self):
 
         while self._handler.if_stop is not True:
+            # 下发模型
             activate = threading.Thread(target=self.activate_clients)
             activate.start()
 
             while True:
+                # 接收模型
                 sender_rank, message_code, payload = self._network.recv()
 
                 if message_code == MessageCode.ParameterUpdate:
@@ -315,13 +317,26 @@ class BaseServerManager(ServerManager):
                         break
                 else:
                     raise Exception(
+                        "Unexpected message code {}".format(message_code)
+                    )
+             # 下发模型
+            test_on_clients = threading.Thread(target=self.test_on_clients)
+            test_on_clients.start()
+
+            while True:
+                # 接收测试精度
+                sender_rank, message_code, payload = self._network.recv()
+
+                if message_code == MessageCode.GlobalTest:
+                    if self._handler._compute_global_test_metric(payload):
+                        break
+                else:
+                    raise Exception(
                         "Unexpected message code {}".format(message_code))
-                
-            # test_on_clients = threading.Thread(target=self.test_on_clients)
-            # test_on_clients.start()
+
 
     def test_on_clients(self):
-        self.logger.info("\nBaseClient test procedure")
+        self.logger.info("BaseClient test procedure")
         rank_dict = self.coordinator.map_id_list(self.clients_this_round)
         self.logger.info(f'rank_dict: {rank_dict}')
 
@@ -330,7 +345,7 @@ class BaseServerManager(ServerManager):
             id_list = torch.Tensor(values).to(downlink_package[0].dtype)
             self._network.send(
                 content=[id_list] + downlink_package,
-                message_code=MessageCode.ParameterUpdate,
+                message_code=MessageCode.LocalTest,
                 dst=rank
             )
 
@@ -341,7 +356,7 @@ class BaseServerManager(ServerManager):
 
     def activate_clients(self):
 
-        self.logger.info("\nBaseClient activation procedure")
+        self.logger.info("BaseClient activation procedure")
         self.clients_this_round = self._handler.sample_clients()
         rank_dict = self.coordinator.map_id_list(self.clients_this_round)
         self.logger.info(f'rank_dict: {rank_dict}')
