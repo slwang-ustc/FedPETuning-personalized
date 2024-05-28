@@ -99,10 +99,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
         return self.round >= self.global_round
 
     def sample_clients(self):
-        selection = random.sample(
-            range(self.client_num_in_total),
-            self.client_num_per_round
-        )
+        selection = random.sample(range(self.client_num_in_total), self.client_num_per_round)
         return selection
 
     def _update_global_model(self, payload):
@@ -144,9 +141,9 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             print(len(payload))
             self.client_metrics_cache += copy.deepcopy(payload)
 
-        assert len(self.client_metrics_cache) <= self.client_num_per_round
+        assert len(self.client_metrics_cache) <= self.client_num_in_total
 
-        if len(self.client_metrics_cache) == self.client_num_per_round:
+        if len(self.client_metrics_cache) == self.client_num_in_total:
             print(f'==========================================accs: {self.client_metrics_cache}')
             global_test_metric = 0.0
             for metric in self.client_metrics_cache:
@@ -170,7 +167,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             self.logger.debug(f"{self.federated_config.fl_algorithm} "
                             f"Round: {self.round}, "
                             f"Current Test {self.metric_name}: {global_test_metric:.3f}, "
-                            f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n\n")
+                            f"Best {self.metric_name}:{self.global_valid_best_metric:.3f}\n")
 
             self.metric_log["logs"].append(
                 {
@@ -297,14 +294,14 @@ class BaseServerManager(ServerManager):
                 self.logger.info(f'content: {content}')
             rank_client_id_map[rank] = content[0].item()
         self.coordinator = Coordinator(rank_client_id_map, mode='GLOBAL')  # mode='GLOBAL'
-        self.logger.info(f'rank_client_id_map: {rank_client_id_map}')
+        self.logger.info(f'rank_client_id_map: {rank_client_id_map}\n\n')
         if self._handler is not None:
             self._handler.client_num_in_total = self.coordinator.total
 
     def main_loop(self):
 
         while self._handler.if_stop is not True:
-            # 下发模型
+            # 下发模型，进行训练
             activate = threading.Thread(target=self.activate_clients)
             activate.start()
 
@@ -319,7 +316,8 @@ class BaseServerManager(ServerManager):
                     raise Exception(
                         "Unexpected message code {}".format(message_code)
                     )
-             # 下发模型
+                
+             # 下发模型，进行测试
             test_on_clients = threading.Thread(target=self.test_on_clients)
             test_on_clients.start()
 
@@ -337,7 +335,7 @@ class BaseServerManager(ServerManager):
 
     def test_on_clients(self):
         self.logger.info("BaseClient test procedure")
-        rank_dict = self.coordinator.map_id_list(self.clients_this_round)
+        rank_dict = self.coordinator.map_id_list(range(self._handler.client_num_in_total))
         self.logger.info(f'rank_dict: {rank_dict}')
 
         for rank, values in rank_dict.items():

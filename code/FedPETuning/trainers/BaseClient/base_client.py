@@ -101,9 +101,10 @@ class BaseClientTrainer(ClientTrainer, ABC):
         train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
         
         if model_parameters is not None:
+            # 第一次参与训练
             if self.non_pers_params_idxes.get(idx, None) == None:
-                # self.non_pers_params_idxes[idx] = [0, 1, 2, 3, 4, 5, 6]
                 SerializationTool.deserialize_model(self._model, model_parameters)
+            # 第二次参与训练
             else:
                 SerializationTool.deserialize_personalized_model(
                     self._model, 
@@ -129,7 +130,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         # TODO
         self.non_pers_params_idxes[idx] = []
         # non_pers_params_layers = [0, 1 , 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        non_pers_params_layers = [12]
+        non_pers_params_layers = [0, 1, 2, 3, 4, 5]
         for layer_idx in non_pers_params_layers:
             for name in self._model.trainable_params_names[layer_idx]:
                 self.non_pers_params_idxes[idx].append(self._model.name_idx_mapping[name])
@@ -141,10 +142,18 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         if model_parameters is not None:
             if self.non_pers_params_idxes.get(idx, None) == None:
-                self.logger.info(f'==========================================non_pers_params_idxes of client {idx} is None')
+                # self.logger.info(f'==========================================non_pers_params_idxes of client {idx} is None')
                 SerializationTool.deserialize_model(self._model, model_parameters)
+                train_loader = self._get_dataloader(dataset=self.train_dataset, client_id=idx)
+                # build optimizer,scheduler,loss
+                optimizer, scheduler = self._build_optimizer(self._model, len(train_loader))
+                self._model, optimizer = self._mixed_train_model(self._model, optimizer)
+                self._build_loss()
+                self._on_epoch_begin()
+                self._on_epoch(train_loader, optimizer, scheduler)
+                # self._on_epoch_end(idx)
             else:
-                print(f'=================================non_pers_params_idxes of client {idx} is {self.non_pers_params_idxes[idx]}')
+                # print(f'=================================non_pers_params_idxes of client {idx} is {self.non_pers_params_idxes[idx]}')
                 SerializationTool.deserialize_personalized_model(
                     self._model, 
                     model_parameters, self.latest_parameters[idx], 
@@ -167,7 +176,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         )
         self.loc_test_metric[idx] = test_metric
 
-        self.latest_parameters[idx] = self.model_parameters
+        # self.latest_parameters[idx] = self.model_parameters
 
 
     def _get_dataloader(self, dataset, client_id: int):
@@ -416,7 +425,6 @@ class BaseClientManager(PassiveClientManager, ABC):
                 if self._network.rank == self._network.world_size - 1:
                     self._network.send(message_code=MessageCode.Exit, dst=0)
                 break
-            
             elif message_code == MessageCode.ParameterUpdate:
                 # id_list: 本rank包含的客户端id, payload: 模型参数
                 id_list, payload = payload[0].to(torch.int32).tolist(), payload[1: ]
@@ -434,16 +442,7 @@ class BaseClientManager(PassiveClientManager, ABC):
                 
                 self.id_list = id_list
                 self.upload_local_model_params()
-            else:
-                raise ValueError(f"Invalid MessageCode {message_code}. MessageCode of ParameterUpdate is {MessageCode.ParameterUpdate}.")
-            
-
-
-            # 从服务器接收 全局模型参数，并在 本地测试集 上进行 测试
-            sender_rank, message_code, payload = self._network.recv(src=0)
-
-            if message_code == MessageCode.LocalTest:
-                
+            elif message_code == MessageCode.LocalTest:
                 # id_list: 本rank包含的客户端id, payload: 模型参数
                 id_list, payload = payload[0].to(torch.int32).tolist(), payload[1: ]
                 # check the trainer type
@@ -452,15 +451,35 @@ class BaseClientManager(PassiveClientManager, ABC):
                         id_list=id_list,
                         payload=payload
                     )
-
                 elif self._trainer.type == ORDINARY_TRAINER:  # ordinary
                     assert len(id_list) == 1
                     self._trainer.lcoal_test(payload=payload)
-
                 self.id_list = id_list
                 self.upload_test_metrics()
             else:
-                raise ValueError(f"Invalid MessageCode {message_code}. MessageCode of LocalTest is {MessageCode.LocalTest}.")
+                raise ValueError(f"Invalid MessageCode {message_code}. Valid MessageCodes are {MessageCode.ParameterUpdate}, {MessageCode.Exit} and {MessageCode.LocalTest}.")
+            
+
+
+            # # 从服务器接收 全局模型参数，并在 本地测试集 上进行 测试
+            # sender_rank, message_code, payload = self._network.recv(src=0)
+
+            # if message_code == MessageCode.LocalTest:
+            #     # id_list: 本rank包含的客户端id, payload: 模型参数
+            #     id_list, payload = payload[0].to(torch.int32).tolist(), payload[1: ]
+            #     # check the trainer type
+            #     if self._trainer.type == SERIAL_TRAINER:  # serial
+            #         self._trainer.local_test(
+            #             id_list=id_list,
+            #             payload=payload
+            #         )
+            #     elif self._trainer.type == ORDINARY_TRAINER:  # ordinary
+            #         assert len(id_list) == 1
+            #         self._trainer.lcoal_test(payload=payload)
+            #     self.id_list = id_list
+            #     self.upload_test_metrics()
+            # else:
+            #     raise ValueError(f"Invalid MessageCode {message_code}. Valid MessageCodes is {MessageCode.LocalTest}.")
 
     def synchronize(self):
         """Synchronize with server"""
@@ -488,14 +507,10 @@ class BaseClientManager(PassiveClientManager, ABC):
         self.logger.info("Uploading local model parameters to server.")
 
         uplink_package = self._trainer.uplink_package
-
         upload_params_idxes = []
-        # test_metrics = []
         for idx in self.id_list:
-            # test_metrics.append(torch.tensor(self._trainer.loc_test_metric[idx]).to(uplink_package[0].dtype))
             upload_params_idxes.append(torch.tensor(self._trainer.non_pers_params_idxes[idx]).to(uplink_package[0].dtype))
 
-        # content = uplink_package + upload_params_idxes + test_metrics
         content = uplink_package + upload_params_idxes
         # print(f'===========================================, content is {content}')
 
@@ -508,9 +523,6 @@ class BaseClientManager(PassiveClientManager, ABC):
     def upload_test_metrics(self):
         self.logger.info("Uploading test metrics to server.")
 
-        uplink_package = self._trainer.uplink_package
-
-        # upload_params_idxes = []
         test_metrics = []
         for idx in self.id_list:
             test_metrics.append(torch.tensor(self._trainer.loc_test_metric[idx]))

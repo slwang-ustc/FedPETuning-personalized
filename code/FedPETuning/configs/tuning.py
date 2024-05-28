@@ -4,7 +4,8 @@ all_delta_config = {
     "adapter_roberta-base":
         {
             "delta_type": "adapter",
-            "learning_rate": 1e-3,
+            # "learning_rate": 1e-3,      # rte
+            "learning_rate": 5e-4,      # mnli
             "unfrozen_modules": [
                 "deltas",
                 "layer_norm",
