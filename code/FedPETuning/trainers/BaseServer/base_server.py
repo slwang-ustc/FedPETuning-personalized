@@ -129,7 +129,7 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             self.client_buffer_cache = []
             self.client_params_idxes_cache = []
             
-
+            self.round += 1
             return True  # return True to end this round.
         else:
             return False
@@ -149,8 +149,6 @@ class BaseSyncServerHandler(ParameterServerBackendHandler, ABC):
             for metric in self.client_metrics_cache:
                 global_test_metric += metric
             global_test_metric /= len(self.client_metrics_cache)
-
-            self.round += 1
 
             # TODO hard code
             if self.global_valid_best_metric < global_test_metric:
@@ -316,21 +314,22 @@ class BaseServerManager(ServerManager):
                     raise Exception(
                         "Unexpected message code {}".format(message_code)
                     )
-                
-             # 下发模型，进行测试
-            test_on_clients = threading.Thread(target=self.test_on_clients)
-            test_on_clients.start()
+            
+            if self._handler.round % 5 == 0:
+                # 下发模型，进行测试
+                test_on_clients = threading.Thread(target=self.test_on_clients)
+                test_on_clients.start()
 
-            while True:
-                # 接收测试精度
-                sender_rank, message_code, payload = self._network.recv()
+                while True:
+                    # 接收测试精度
+                    sender_rank, message_code, payload = self._network.recv()
 
-                if message_code == MessageCode.GlobalTest:
-                    if self._handler._compute_global_test_metric(payload):
-                        break
-                else:
-                    raise Exception(
-                        "Unexpected message code {}".format(message_code))
+                    if message_code == MessageCode.GlobalTest:
+                        if self._handler._compute_global_test_metric(payload):
+                            break
+                    else:
+                        raise Exception(
+                            "Unexpected message code {}".format(message_code))
 
 
     def test_on_clients(self):

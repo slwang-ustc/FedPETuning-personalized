@@ -14,6 +14,7 @@ from fedlab.utils import MessageCode, SerializationTool
 from fedlab.core.client.trainer import ClientTrainer
 from fedlab.core.client.manager import PassiveClientManager
 from fedlab.core.client.manager import ORDINARY_TRAINER, SERIAL_TRAINER
+import random
 
 
 class BaseClientTrainer(ClientTrainer, ABC):
@@ -130,7 +131,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         # TODO
         self.non_pers_params_idxes[idx] = []
         # non_pers_params_layers = [0, 1 , 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        non_pers_params_layers = [0, 1, 2, 3, 4, 5]
+        non_pers_params_layers = [6, 7, 8, 9, 10, 11]
         for layer_idx in non_pers_params_layers:
             for name in self._model.trainable_params_names[layer_idx]:
                 self.non_pers_params_idxes[idx].append(self._model.name_idx_mapping[name])
