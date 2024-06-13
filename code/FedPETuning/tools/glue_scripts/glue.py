@@ -47,9 +47,9 @@ def load_glue_examples(args):
     # HACK(label indices are swapped in RoBERTa pretrained model)
     # label_list[1], label_list[2] = label_list[2], label_list[1]
 
-    train_examples = processor.get_train_examples(args.data_dir)
-    valid_examples = processor.get_dev_examples(args.data_dir)
-    test_examples = processor.get_test_examples(args.data_dir)
+    train_examples = processor.get_train_examples(args.data_dir)  # list: InputExample(guid, text_a, text_b, label) str, str, str, str
+    valid_examples = processor.get_dev_examples(args.data_dir)    # list: InputExample(guid, text_a, text_b, label) str, str, str, str
+    test_examples = processor.get_test_examples(args.data_dir)    # list: InputExample(guid, text_a, text_b, label) str, str, str, str
 
     return train_examples, valid_examples, test_examples, output_mode, label_list
 
@@ -57,8 +57,10 @@ def load_glue_examples(args):
 def get_partition_data(
     examples, num_classes, num_clients, label_vocab, dir_alpha, partition, 
     proportions_client_list=None, dataset_type=None
-):
+):  
+    # targets: [str]  "entailment"/"not_entailment"
     targets = [example.label for example in examples]
+    # label_vocab: ["entailment", "not_entailment"]
     clients_partition_data = GlueDataPartition(
         targets=targets, num_classes=num_classes, num_clients=num_clients,
         label_vocab=label_vocab, dir_alpha=dir_alpha, partition=partition, verbose=False,
@@ -66,6 +68,8 @@ def get_partition_data(
     )
     # assert (len(clients_partition_data) == num_clients,
     #         "The partition function is wrong, please check")
+    
+    # partition_data: {0: [example_id], 1: [example_id], ...} example_id: int
     partition_data = {}
     for idx in range(len(clients_partition_data)):
         client_idxs = clients_partition_data[idx]
@@ -90,6 +94,10 @@ def convert_glue_to_device_pkl(args):
         output_mode, label_list = data["output_mode"], data["label_list"]
     else:
         logger.info(f"Generating examples from {args.data_dir} ...")
+
+        # original_train_examples (list): InputExample(guid, text_a, text_b, label) str, str, str, str
+        # output_mode: "classification"
+        # label_list: ["entailment", "not_entailment"]
         original_train_examples, original_valid_examples, original_test_examples, output_mode, label_list \
             = load_glue_examples(args)
 
@@ -134,17 +142,24 @@ def convert_glue_to_device_pkl(args):
     logger.info(f"partition data's keys: {partition_data.keys()}")
 
     if f"clients={args.clients_num}_alpha={args.alpha}" in partition_data and not args.overwrite:
-        logger.info(f"Partition method 'clients={args.clients_num}_alpha={args.alpha}' has existed "
-                    f"and overwrite={args.overwrite}, then skip")
+        logger.info(
+            f"Partition method 'clients={args.clients_num}_alpha={args.alpha}' has existed "
+            f"and overwrite={args.overwrite}, then skip"
+        )
     else:
+        
+        # lable_mapping: {"entailment": 0, "not_entailment": 1}
         lable_mapping = {label: idx for idx, label in enumerate(label_list)}
-        attribute = {"lable_mapping": lable_mapping, "label_list": label_list,
-                     "clients_num": args.clients_num, "alpha": args.alpha,
-                     "output_mode": output_mode
-                     }
+        # label_list: ["entailment", "not_entailment"]
+        # output_mode: "classification"
+        attribute = {
+            "lable_mapping": lable_mapping, "label_list": label_list,
+            "clients_num": args.clients_num, "alpha": args.alpha,
+            "output_mode": output_mode
+        }
 
 
-
+        # train_partition_data: {0: [example_idx], 1: [example_idx], ...} example_idx: int
         train_partition_data, proportions_client_list = get_partition_data(
             examples=train_examples, num_classes=len(label_list), num_clients=args.clients_num,
             label_vocab=label_list, dir_alpha=args.alpha, partition="dirichlet", dataset_type='train'
@@ -159,9 +174,6 @@ def convert_glue_to_device_pkl(args):
             label_vocab=label_list, dir_alpha=args.alpha, partition="dirichlet", 
             proportions_client_list=proportions_client_list, dataset_type='test'
         )
-
-
-
 
         clients_partition_data = {
             "train": train_partition_data, 

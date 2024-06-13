@@ -56,6 +56,7 @@ class GlueDataPartition(DataPartitioner):
     def _perform_partition(self):
         
         if self.dataset_type == 'train':
+            # self.client_dict: [[example_id], [example_id], ...] example_id: int
             self.client_dict, self.proportions_client_list = label_skew_process(
                 label_vocab=self.label_vocab, label_assignment=self.targets,
                 client_num=self.num_clients, alpha=self.dir_alpha,

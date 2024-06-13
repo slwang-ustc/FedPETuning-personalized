@@ -109,10 +109,11 @@ def label_skew_process(label_vocab, label_assignment, client_num, alpha,
         print(f'label_vocal.value: {value}')
         print(f'label_assignment: {label_assignment[:10]}')
 
+        # label_assignment: [str]  "entailment"/"not_entailment"
         label_location = np.where(label_assignment == value)[0]
         label_proportion.append(len(label_location) / data_length)
         np.random.shuffle(label_location)
-        label_index_matrix[index].extend(label_location[:])
+        label_index_matrix[index].extend(label_location[: ])
     print(label_proportion)
     # calculate size for each partition client
     label_index_tracker = np.zeros(len(label_vocab), dtype=int)
@@ -162,19 +163,20 @@ def label_skew_process(label_vocab, label_assignment, client_num, alpha,
                 label_index_tracker[label_id] = label_data_length
                 label_index_offset = dynamic_batch_fill(
                     label_index_tracker, label_index_matrix,
-                    end - label_data_length, label_id)
+                    end - label_data_length, label_id
+                )
                 for fill_label_id in label_index_offset.keys():
                     start = label_index_tracker[fill_label_id]
-                    end = (label_index_tracker[fill_label_id] +
-                           label_index_offset[fill_label_id])
+                    end = (label_index_tracker[fill_label_id] + label_index_offset[fill_label_id])
                     each_client_partition_result.extend(
-                        label_index_matrix[fill_label_id][start:end])
+                        label_index_matrix[fill_label_id][start: end])
                     label_index_tracker[fill_label_id] = (
                         label_index_tracker[fill_label_id] +
                         label_index_offset[fill_label_id])
             else:
+                # each_client_partition_result: [example_id]  example_id: int
                 each_client_partition_result.extend(
-                    label_index_matrix[label_id][start:end]
+                    label_index_matrix[label_id][start: end]
                 )
                 label_index_tracker[label_id] = label_index_tracker[label_id] + offset
 
@@ -183,14 +185,12 @@ def label_skew_process(label_vocab, label_assignment, client_num, alpha,
             print("last id length", len(each_client_partition_result))
             print("Last client fill the rest of the unfilled lables.\n")
             for not_fillall_label_id in range(len(label_vocab)):
-                if label_index_tracker[not_fillall_label_id] < len(
-                        label_index_matrix[not_fillall_label_id]):
+                if label_index_tracker[not_fillall_label_id] < len(label_index_matrix[not_fillall_label_id]):
                     print("fill more id", not_fillall_label_id)
                     start = label_index_tracker[not_fillall_label_id]
-                    each_client_partition_result.extend(
-                        label_index_matrix[not_fillall_label_id][start:])
-                    label_index_tracker[not_fillall_label_id] = len(
-                        label_index_matrix[not_fillall_label_id])
+                    each_client_partition_result.extend(label_index_matrix[not_fillall_label_id][start:])
+                    label_index_tracker[not_fillall_label_id] = len(label_index_matrix[not_fillall_label_id])
+        # partition_result: [[example_id], [example_id], ...] example_id: int
         partition_result[client_id] = each_client_partition_result
     print(f'proportions_client_list: {proportions_client_list}\n')
     # new

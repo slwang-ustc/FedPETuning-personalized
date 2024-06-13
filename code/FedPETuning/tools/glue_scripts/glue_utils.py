@@ -381,7 +381,7 @@ class RteProcessor(DataProcessor):
 
     def _create_examples(self, lines, set_type):
         """Creates examples for the training, dev and test sets."""
-        examples = []
+        examples = []                               # each example in examples: InputExample(guid, text_a, text_b, label) str, str, str, str
         for i, line in enumerate(lines):
             if i == 0:
                 continue
