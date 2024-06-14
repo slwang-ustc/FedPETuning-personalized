@@ -1,5 +1,5 @@
 """Test some code snippets"""
-# bash fed_run.sh /data/slwang/FedPETuning_personalized rte fedavg 10001 0 1 2 3 4 5
+# bash fed_run.sh /data/slwang/FedPETuning_personalized rte fedavg 10002 0 1 2 3 4 5
 
 import torch
 import torch.nn as nn
@@ -35,13 +35,9 @@ backbone = AutoModelForSequenceClassification.from_pretrained(
 delta_args = {'delta_type': 'adapter', 'learning_rate': 0.001, 'unfrozen_modules': ['deltas', 'layer_norm', 'final_layer_norm', 'classifier'], 'bottleneck_dim': 64}
 delta_config = AutoDeltaConfig.from_dict(delta_args)
 delta_model = AutoDeltaModel.from_config(delta_config, backbone_model=backbone)
-
-
 delta_model.freeze_module(set_state_dict=True)
 
 for idx, (name, params) in enumerate(backbone.named_parameters()):
-    if 'adapter' in name:
-        print(idx)
+    print(name, idx)
 
-# delta_model.log(delta_ratio=True, trainable_ratio=True, visualization=True)
-# Visualization(backbone).structure_graph()
+Visualization(backbone).structure_graph()

@@ -17,6 +17,7 @@ class SeqClassification(BaseModels, ABC):
         self.num_labels = registry.get("num_labels")
         self.auto_config = self._build_config(num_labels=self.num_labels)
         self.backbone = self._build_model()
+        self._set_layernorms_trainable_params(self.backbone, True)          # 让LayerNorm参数可训练
         self.name_idx_mapping = self._map_name_with_layer_idx() # dict
         self.trainable_params_names = self._get_trainable_params_name() # list of list (names of each layer)
 

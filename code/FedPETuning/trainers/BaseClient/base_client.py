@@ -130,12 +130,17 @@ class BaseClientTrainer(ClientTrainer, ABC):
 
         # TODO
         self.non_pers_params_idxes[idx] = []
-        # non_pers_params_layers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        non_pers_params_layers = random.sample(range(12), 3)
-        for layer_idx in non_pers_params_layers:
-            for name in self._model.trainable_params_names[layer_idx]:
-                self.non_pers_params_idxes[idx].append(self._model.name_idx_mapping[name])
-            
+        non_pers_params_layers = {
+            "delta_trainable_params_names": [0, 1, 2, 3, 4, 5],  # random.sample(range(12), 3)      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+            "layer_norm_trainable_params_names": [],
+            "classifier_trainable_params_names": [],
+            "extra_embeddings_trainable_params_names": []
+        }
+        for key, v in non_pers_params_layers.items():
+            for layer_idx in v:
+                for name in self._model.trainable_params_names[key][layer_idx]:
+                    self.non_pers_params_idxes[idx].append(self._model.name_idx_mapping[name])
+                    
         self.latest_parameters[idx] = self.model_parameters
 
     def test_on_client(self, model_parameters, idx):

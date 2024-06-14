@@ -94,27 +94,59 @@ class BaseModels(nn.Module, ABC):
     def _map_name_with_layer_idx(self):
         name_idx_mapping = {}
         layer_idx = 0
-        for name, _ in self.backbone.named_parameters():
+        for name, _ in self.named_parameters():
             name_idx_mapping[name] = layer_idx
             layer_idx += 1
         return name_idx_mapping
     
-    # deltas + classifier
+    # [deltas + classifier], [LayerNorm]
     def _get_trainable_params_name(self):
-        trainable_params_names = []
-        layer_trainable_params_names = []
-        count = 0
-        for k, _ in self.backbone.state_dict().items():
-            if self.delta_type == 'adapter':
-                if count % 8 == 0 and count != 0:
-                    trainable_params_names.append(layer_trainable_params_names)
-                    layer_trainable_params_names = []
-                layer_trainable_params_names.append(k)
-                count += 1
-            else:
-                pass
-        trainable_params_names.append(layer_trainable_params_names)
+        trainable_params_names = {
+            "delta_trainable_params_names": [],
+            "layer_norm_trainable_params_names": [],
+            "classifier_trainable_params_names": [],
+            "extra_embeddings_trainable_params_names": []
+        }
+        delta_count = 0
+        layer_norm_count = 0
+        layer_delta_trainable_params_names = []
+        layer_classifier_trainable_params_names = []
+        layer_norm_trainable_params_names = []
+        layer_embedding_norm_trainable_params_names = []
+        layer_extra_embeddings_trainable_params_names = []
+        for name, _ in self.named_parameters():
+            if self.delta_type in name:
+                delta_count += 1
+                layer_delta_trainable_params_names.append(name)
+                if delta_count % 8 == 0:
+                    trainable_params_names["delta_trainable_params_names"].append(layer_delta_trainable_params_names)
+                    layer_delta_trainable_params_names = []
+            elif "classifier" in name:
+                layer_classifier_trainable_params_names.append(name)
+            elif "LayerNorm" in name:
+                if "embeddings.LayerNorm" in name:
+                    layer_embedding_norm_trainable_params_names.append(name)
+                else:
+                    layer_norm_count += 1
+                    layer_norm_trainable_params_names.append(name)
+                    if layer_norm_count % 4 == 0:
+                        trainable_params_names["layer_norm_trainable_params_names"].append(layer_norm_trainable_params_names)
+                        layer_norm_trainable_params_names = []
+            elif "extra_embeddings" in name:
+                layer_extra_embeddings_trainable_params_names.append(name)
+                
+                
+        trainable_params_names["classifier_trainable_params_names"].append(layer_classifier_trainable_params_names)
+        trainable_params_names["layer_norm_trainable_params_names"].append(layer_embedding_norm_trainable_params_names)
+        trainable_params_names["extra_embeddings_trainable_params_names"].append(layer_extra_embeddings_trainable_params_names)
+                
         return trainable_params_names
+    
+    def _set_layernorms_trainable_params(self, model, tune_layernorms):
+        for n, sub_module in model.named_modules():
+            if isinstance(sub_module, nn.LayerNorm):
+                for n, p in sub_module.named_parameters():
+                    p.requires_grad = tune_layernorms
 
     def forward(self, inputs):
         raise NotImplementedError

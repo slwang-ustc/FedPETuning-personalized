@@ -5,7 +5,7 @@ all_delta_config = {
         {
             "delta_type": "adapter",
             # "learning_rate": 1e-3,      # rte
-            "learning_rate": 5e-4,      # mnli
+            "learning_rate": 5e-4,        # mnli
             "unfrozen_modules": [
                 "deltas",
                 "layer_norm",
