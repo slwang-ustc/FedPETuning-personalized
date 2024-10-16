@@ -132,7 +132,7 @@ class BaseClientTrainer(ClientTrainer, ABC):
         self.non_pers_params_idxes[idx] = []
         non_pers_params_layers = {
             "delta_trainable_params_names": [0, 1, 2, 3, 4, 5],  # random.sample(range(12), 3)      [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-            "layer_norm_trainable_params_names": [],
+            "layer_norm_trainable_params_names": [0, 1, 2, 3, 4, 5],
             "classifier_trainable_params_names": [],
             "extra_embeddings_trainable_params_names": []
         }

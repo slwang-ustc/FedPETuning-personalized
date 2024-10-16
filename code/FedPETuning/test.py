@@ -1,5 +1,5 @@
 """Test some code snippets"""
-# bash fed_run.sh /data/slwang/FedPETuning_personalized rte fedavg 10002 0 1 2 3 4 5
+# bash fed_run.sh /data/slwang/FedPETuning_personalized mnli fedavg 10002 0 1 2 3 4 5
 
 import torch
 import torch.nn as nn
@@ -12,6 +12,7 @@ from opendelta.auto_delta import AutoDeltaModel
 from bigmodelvis import Visualization
 
 from transformers import AutoModelForTokenClassification, AutoModelForSequenceClassification
+from transformers import AutoTokenizer
 
 auto_config = AutoConfig.from_pretrained(
     pretrained_model_name_or_path = '/data/slwang/FedPETuning_personalized/pretrain/nlp/roberta-base/',
@@ -41,3 +42,23 @@ for idx, (name, params) in enumerate(backbone.named_parameters()):
     print(name, idx)
 
 Visualization(backbone).structure_graph()
+
+
+tokenizer = AutoTokenizer.from_pretrained(
+    '/data/slwang/FedPETuning_personalized/pretrain/nlp/roberta-base/',
+    use_fast=True,
+    revision="main",
+    use_auth_token=False,
+    add_prefix_space=True,
+)
+
+batch_encoding = tokenizer(
+    [("I like." + "<>" + "I like not like."), ("I love. <mask>", "I do not love.")],
+    max_length=128,
+    padding="max_length",
+    truncation=True,
+    add_special_tokens=True
+)
+
+print(batch_encoding)
+print(tokenizer.mask_token_id)
