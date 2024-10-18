@@ -176,8 +176,8 @@ def convert_glue_to_device_pkl(args):
         )
 
         clients_partition_data = {
-            "train": train_partition_data, 
-            "valid": valid_partition_data, 
+            "train": train_partition_data,              # 每个客户端包含的数据样本的index
+            "valid": valid_partition_data,       
             "test": test_partition_data, 
             "attribute": attribute
         }
